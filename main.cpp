@@ -130,7 +130,7 @@ int main(int argc, char const* argv[]) {
     int rank, size;
     int ierr;
     int bufsize, nrchar;
-    char *buf; 
+    char* buf;
     const int overlap = 100;
 
     MPI_Initialized(&initialized);
@@ -197,7 +197,7 @@ int main(int argc, char const* argv[]) {
     MPI_Get_count(&status, MPI_CHAR, &nrchar);
     /* Add a null character to the end of the buffer */
     buf[nrchar] = '\0';
-    printf("Process %d read %d characters: %s \n", rank, nrchar, buf);
+    printf("\n------------------------Process %d read %d characters--------------------\n %s\n", rank, nrchar, buf);
 
     MPI_File_close(&in);
     MPI_File_close(&out);
