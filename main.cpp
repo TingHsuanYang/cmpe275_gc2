@@ -1,6 +1,6 @@
 // send in number of processes and those processes will be partitioned into four groups(Blue, Yellow, Green, Red)
-// mpic++ main.cpp -o main
-// mpirun --hostfile mpi.config -np 4 ./main
+// mpic++ main.cpp -o main.out
+// mpirun --hostfile mpi.config -np 4 ./main.out
 #include <mpi.h>
 
 #include <iostream>
