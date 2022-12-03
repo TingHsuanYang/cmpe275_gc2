@@ -10,6 +10,39 @@ using namespace std;
 
 void removeWord(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
     MPI_Offset globalstart;
+    int mysize;
+    char* buffer;
+
+    /* read in relevant chunk of file into "buffer",
+     * which starts at location in the file globalstart
+     * and has size mysize
+     */
+    {
+        MPI_Offset globalend;
+        MPI_Offset filesize;
+
+        /* figure out who reads what */
+        MPI_File_get_size(*in, &filesize); /* Returns the current size of the file. */
+        filesize--; /* get rid of text file eof */
+        mysize = filesize / size;
+        globalstart = rank * mysize;
+        globalend = globalstart + mysize - 1;
+        if (rank == size - 1) globalend = filesize - 1;
+
+        /* add overlap to the end of everyone's buffer except last proc... */
+        if (rank != size - 1)
+            globalend += overlap;
+
+        mysize = globalend - globalstart + 1;
+
+        /* allocate buffer */
+        buffer = new char[mysize + 1];
+
+        /* everyone reads in their part */
+        MPI_File_read_at_all(*in, globalstart, buffer, mysize, MPI_CHAR, MPI_STATUS_IGNORE);
+        buffer[mysize] = '\0';
+
+    }
 }
 
 void setOneWord(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
