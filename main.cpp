@@ -15,7 +15,57 @@ void removeWord(MPI_File* in, MPI_File* out, const int group_rank, const int gro
 void setOneWord(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
 }
 
-void countWordFrequency(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
+//void countWordFrequency(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
+//}
+
+void countWordFrequency(string str) {
+
+    map<string, int> M;
+ 
+    // String for storing the words
+    string word = "";
+ 
+    for (int i = 0; i < str.size(); i++) {
+ 
+        // Check if current character
+        // is blank space then it
+        // means we have got one word
+        if (str[i] == ' ') {
+ 
+            // If the current word
+            // is not found then insert
+            // current word with frequency 1
+            if (M.find(word) == M.end()) {
+                M.insert(make_pair(word, 1));
+                word = "";
+            }
+ 
+            // update the frequency
+            else {
+                M[word]++;
+                word = "";
+            }
+        }
+ 
+        else
+            word += str[i];
+    }
+ 
+    // Storing the last word of the string
+    if (M.find(word) == M.end())
+        M.insert(make_pair(word, 1));
+ 
+    // Update the frequency
+    else
+        M[word]++;
+ 
+    // Traverse the map
+    // to print the  frequency
+    for (auto& it : M) {
+        cout << it.first << " - "
+             << it.second
+             << endl;
+    }
 }
 
 void sortByWordFrequency(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
@@ -124,6 +174,7 @@ int main(int argc, char const* argv[]) {
     } else if (color == 2) {  // Green
         //     // count the word frequency
         //     countWordFrequency(&in, &out, group_rank, group_size, overlap);
+         countWordFrequency(buf);
         MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 1, 12, &YG_comm);
         MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 3, 123, &GR_comm);
     } else if (color == 3) {  // Red
