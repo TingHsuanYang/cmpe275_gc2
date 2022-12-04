@@ -8,40 +8,8 @@
 
 using namespace std;
 
-void removeWord(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
-    MPI_Offset globalstart;
-    int mysize;
-    char* buffer;
-
-    /* read in relevant chunk of file into "buffer",
-     * which starts at location in the file globalstart
-     * and has size mysize
-     */
-    {
-        MPI_Offset globalend;
-        MPI_Offset filesize;
-
-        /* figure out who reads what */
-        MPI_File_get_size(*in, &filesize); /* Returns the current size of the file. */
-        filesize--;                        /* get rid of text file eof */
-        mysize = filesize / size;
-        globalstart = rank * mysize;
-        globalend = globalstart + mysize - 1;
-        if (rank == size - 1) globalend = filesize - 1;
-
-        /* add overlap to the end of everyone's buffer except last proc... */
-        if (rank != size - 1)
-            globalend += overlap;
-
-        mysize = globalend - globalstart + 1;
-
-        /* allocate buffer */
-        buffer = new char[mysize + 1];
-
-        /* everyone reads in their part */
-        MPI_File_read_at_all(*in, globalstart, buffer, mysize, MPI_CHAR, MPI_STATUS_IGNORE);
-        buffer[mysize] = '\0';
-    }
+/* remove the unwanted word*/
+void removeWord(MPI_File* in, MPI_File* out, const int group_rank, const int group_size) {
 }
 
 void setOneWord(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
@@ -53,81 +21,17 @@ void countWordFrequency(MPI_File* in, MPI_File* out, const int rank, const int s
 void sortByWordFrequency(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
 }
 
-void parprocess(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
-    MPI_Offset globalstart;
-    int mysize;
-    char* chunk;
-
-    /* read in relevant chunk of file into "chunk",
-     * which starts at location in the file globalstart
-     * and has size mysize
-     */
-    {
-        MPI_Offset globalend;
-        MPI_Offset filesize;
-
-        /* figure out who reads what */
-        MPI_File_get_size(*in, &filesize);
-        filesize--; /* get rid of text file eof */
-        mysize = filesize / size;
-        globalstart = rank * mysize;
-        globalend = globalstart + mysize - 1;
-        if (rank == size - 1) globalend = filesize - 1;
-
-        /* add overlap to the end of everyone's chunk except last proc... */
-        if (rank != size - 1)
-            globalend += overlap;
-
-        mysize = globalend - globalstart + 1;
-
-        /* allocate memory */
-        chunk = new char[mysize + 1];
-
-        /* everyone reads in their part */
-        MPI_File_read_at_all(*in, globalstart, chunk, mysize, MPI_CHAR, MPI_STATUS_IGNORE);
-        chunk[mysize] = '\0';
-    }
-
-    /*
-     * everyone calculate what their start and end *really* are by going
-     * from the first newline after start to the first newline after the
-     * overlap region starts (eg, after end - overlap + 1)
-     */
-
-    int locstart = 0, locend = mysize - 1;
-    if (rank != 0) {
-        while (chunk[locstart] != '\n') locstart++;
-        locstart++;
-    }
-    if (rank != size - 1) {
-        locend -= overlap;
-        while (chunk[locend] != '\n') locend++;
-    }
-    mysize = locend - locstart + 1;
-
-    /* "Process" our chunk by replacing non-space characters with '1' for
-     * rank 1, '2' for rank 2, etc...
-     */
-
-    for (int i = locstart; i <= locend; i++) {
-        char c = chunk[i];
-        chunk[i] = (isspace(c) ? c : '1' + (char)rank);
-    }
-
-    /* output the processed file */
-
-    MPI_File_write_at_all(*out, (MPI_Offset)(globalstart + (MPI_Offset)locstart), &(chunk[locstart]), mysize, MPI_CHAR, MPI_STATUS_IGNORE);
-
-    return;
+void readInTheFile(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
 }
 
 int main(int argc, char const* argv[]) {
     string colors[4] = {"Blue", "Yellow", "Green", "Red"};
+    MPI_Comm group_comm, BY_comm, YG_comm, GR_comm, RD_comm;
     MPI_File in, out;
     MPI_Offset filesize; /*  integer type of size sufficient to represent the size (in bytes) */
     MPI_Status status;   /* Status returned from read */
+    int world_rank, world_size, group_rank, group_size;
     int initialized, finalized;
-    int rank, size;
     int ierr;
     int bufsize, nrchar;
     char* buf;
@@ -137,12 +41,12 @@ int main(int argc, char const* argv[]) {
     if (!initialized)
         MPI_Init(NULL, NULL);
 
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
     /* Check the arguments */
     if (argc != 3) {
-        if (rank == 0) fprintf(stderr, "Usage: %s infilename outfilename\n", argv[0]);
+        if (world_rank == 0) fprintf(stderr, "Usage: %s infilename outfilename\n", argv[0]);
         MPI_Finalize();
         exit(1);
     }
@@ -150,7 +54,7 @@ int main(int argc, char const* argv[]) {
     /* Read the input file */
     ierr = MPI_File_open(MPI_COMM_WORLD, argv[1], MPI_MODE_RDONLY, MPI_INFO_NULL, &in);
     if (ierr) {
-        if (rank == 0) fprintf(stderr, "%s: Couldn't open file %s\n", argv[0], argv[1]);
+        if (world_rank == 0) fprintf(stderr, "%s: Couldn't open file %s\n", argv[0], argv[1]);
         MPI_Finalize();
         exit(2);
     }
@@ -158,46 +62,78 @@ int main(int argc, char const* argv[]) {
     /* Get the size of the file */
     ierr = MPI_File_get_size(in, &filesize);
     if (ierr) {
-        if (rank == 0) fprintf(stderr, "%s: Couldn't read file size of %s\n", argv[0], argv[1]);
+        if (world_rank == 0) fprintf(stderr, "%s: Couldn't read file size of %s\n", argv[0], argv[1]);
         MPI_Finalize();
-        exit(2);
+        exit(3);
     }
 
     /* Open the output file */
     ierr = MPI_File_open(MPI_COMM_WORLD, argv[2], MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &out);
     if (ierr) {
-        if (rank == 0) fprintf(stderr, "%s: Couldn't open output file %s\n", argv[0], argv[2]);
-        MPI_Finalize();
-        exit(3);
-    }
-
-    /* Calculate how many elements that is */
-    filesize = filesize / sizeof(char);
-    /* Calculate how many elements each processor gets */
-    bufsize = filesize / size;
-    /* Allocate the buffer */
-    buf = new char[bufsize + 1];
-    /* Set the file view, changes process’s view of data in file (collective). */
-    ierr = MPI_File_set_view(in, rank * bufsize, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL);
-    if (ierr) {
-        if (rank == 0) fprintf(stderr, "%s: Couldn't set file view for %s", argv[0], argv[1]);
+        if (world_rank == 0) fprintf(stderr, "%s: Couldn't open output file %s\n", argv[0], argv[2]);
         MPI_Finalize();
         exit(4);
     }
 
-    /* Read from the file */
-    ierr = MPI_File_read(in, buf, bufsize, MPI_CHAR, &status);
+    /* split into groups*/
+    int color = world_rank % 4;
+    MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &group_comm);
+    MPI_Comm_rank(group_comm, &group_rank);
+    MPI_Comm_size(group_comm, &group_size);
+
+    printf("Rank %d/%d in original comm, group [%s] %d/%d in new comm\n", world_rank, world_rank, colors[color].c_str(), color, group_size);
+
+    /* Calculate how many elements that is */
+    filesize = filesize / sizeof(char);
+    /* Calculate how many elements each processor gets */
+    bufsize = filesize / group_size;
+
+    ierr = MPI_File_set_view(in, group_rank * bufsize, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL);  // split the file for group members
     if (ierr) {
-        if (rank == 0) fprintf(stderr, "%s: Couldn't read from file %s", argv[0], argv[1]);
+        if (group_rank == 0) fprintf(stderr, "%s: Couldn't set file view for %s", argv[0], argv[1]);
         MPI_Finalize();
         exit(5);
     }
 
-    /* Get the number of characters read */
-    MPI_Get_count(&status, MPI_CHAR, &nrchar);
-    /* Add a null character to the end of the buffer */
-    buf[nrchar] = '\0';
-    printf("\n------------------------Process %d read %d characters--------------------\n %s\n", rank, nrchar, buf);
+    if (color == 0) {  // Blue: remove the unwanted word in text file
+        /* Allocate the buffer */
+        buf = new char[bufsize + 1];
+        /* Reads a file starting at the location specified by the individual file pointer (blocking, noncollective) */
+        ierr = MPI_File_read(in, buf, bufsize, MPI_CHAR, &status);
+        if (ierr) {
+            if (group_rank == 0) fprintf(stderr, "%s: Couldn't read from file %s", argv[0], argv[1]);
+            MPI_Finalize();
+            exit(6);
+        }
+        /* Gets the number of top-level elements received. */
+        MPI_Get_count(&status, MPI_CHAR, &nrchar);
+        /* Add a null character to the end of the buffer */
+        buf[nrchar] = '\0';
+        printf("\n------------------------[Blue]Process %d read %d characters--------------------\n %s\n", group_rank, nrchar, buf);
+
+        // removeWord(&in, &out, group_rank, group_size);
+        /* Creates an intercommunicator from two intracommunicators. */
+
+        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 1, 1, &BY_comm);
+    } else if (color == 1) {  // Yellow
+
+        //     // set to one word each line
+        //     setOneWord(&in, &out, group_rank, group_size, overlap);
+        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 0, 1, &BY_comm);
+        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 2, 12, &YG_comm);
+    } else if (color == 2) {  // Green
+        //     // count the word frequency
+        //     countWordFrequency(&in, &out, group_rank, group_size, overlap);
+        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 1, 12, &YG_comm);
+        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 3, 123, &GR_comm);
+    } else if (color == 3) {  // Red
+
+        //     // sort by the word frequency
+        //     sortByWordFrequency(&in, &out, group_rank, group_size, overlap);
+        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 2, 123, &GR_comm);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     MPI_File_close(&in);
     MPI_File_close(&out);
@@ -205,34 +141,6 @@ int main(int argc, char const* argv[]) {
     MPI_Finalized(&finalized);
     if (!finalized)
         MPI_Finalize();
-
-    // int color = rank % 4;
-    // MPI_Comm group_comm;
-    // MPI_Comm_split(MPI_COMM_WORLD, color, rank, &group_comm);
-
-    // int group_rank;
-    // MPI_Comm_rank(group_comm, &group_rank);
-
-    // int group_size;
-    // MPI_Comm_size(group_comm, &group_size);
-
-    // printf("Rank %d/%d in original comm, group [%s] %d/%d in new comm\n", rank, size, colors[color].c_str(), color, group_size);
-
-    // parprocess(&in, &out, rank, size, overlap);
-
-    // if (color == 0) {  // Blue
-    // remove the unwanted word in text file
-    //     removeWord(&in, &out, group_rank, group_size, overlap);
-    // } else if (color == 1) {  // Yellow
-    //     // set to one word each line
-    //     setOneWord(&in, &out, group_rank, group_size, overlap);
-    // } else if (color == 2) {  // Green
-    //     // count the word frequency
-    //     countWordFrequency(&in, &out, group_rank, group_size, overlap);
-    // } else if (color == 3) {  // Red
-    //     // sort by the word frequency
-    //     sortByWordFrequency(&in, &out, group_rank, group_size, overlap);
-    // }
 
     return 0;
 }
