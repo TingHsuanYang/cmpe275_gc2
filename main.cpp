@@ -33,7 +33,6 @@ void countFrequency(MPI_File* in, MPI_File* out, const int rank, const int size,
 void sortByFrequency(MPI_File* in, MPI_File* out, const int rank, const int size, const int overlap) {
 }
 
-
 int main(int argc, char const* argv[]) {
     string colors[4] = {"Blue", "Yellow", "Green", "Red"};
     MPI_Comm group_comm, BY_comm, YG_comm, GR_comm, RD_comm;
@@ -97,69 +96,77 @@ int main(int argc, char const* argv[]) {
     /* Calculate how many elements each processor gets */
     bufsize = filesize / group_size;
 
-    ierr = MPI_File_set_view(in, group_rank * bufsize, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL);  // split the file for group members
-    if (ierr) {
-        if (group_rank == 0) fprintf(stderr, "%s: Couldn't set file view for %s", argv[0], argv[1]);
-        MPI_Finalize();
-        exit(5);
-    }
-
-    ierr = MPI_File_set_view(out, group_rank * bufsize, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL);  // split the file for group members
-    if (ierr) {
-        if (group_rank == 0) fprintf(stderr, "%s: Couldn't set file view for %s", argv[0], argv[1]);
-        MPI_Finalize();
-        exit(6);
-    }
-
-    if (color == 0) {  // Blue: remove the unwanted word in text file
-        /* Allocate the buffer */
-        buf = new char[bufsize + 1];
-        /* Reads a file starting at the location specified by the individual file pointer (blocking, noncollective) */
-        ierr = MPI_File_read(in, buf, bufsize, MPI_CHAR, &status);
+    while (true) {
+        ierr = MPI_File_set_view(in, group_rank * bufsize, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL);  // split the file for group members
         if (ierr) {
-            if (group_rank == 0) fprintf(stderr, "%s: Couldn't read from file %s", argv[0], argv[1]);
+            if (group_rank == 0) fprintf(stderr, "%s: Couldn't set file view for %s", argv[0], argv[1]);
             MPI_Finalize();
-            exit(7);
-        }
-        /* Gets the number of top-level elements received. */
-        MPI_Get_count(&status, MPI_CHAR, &nrchar);
-        /* Add a null character to the end of the buffer */
-        buf[nrchar] = '\0';
-        printf("\n------------------------[Blue]Process %d read %d characters--------------------\n%s\n", group_rank, nrchar, buf);
-        removePunctuation(buf);
-        printf("\n------------------------[Blue]Process %d After Process--------------------\n%s\n", group_rank, buf);
-        ierr = MPI_File_write(out, buf, nrchar, MPI_CHAR, &status);
-        if (ierr) {
-            if (group_rank == 0) fprintf(stderr, "%s: Couldn't write to file %s", argv[0], argv[2]);
-            MPI_Finalize();
-            exit(8);
+            exit(5);
         }
 
-        /* Creates an intercommunicator from two intracommunicators. */
+        ierr = MPI_File_set_view(out, group_rank * bufsize, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL);  // split the file for group members
+        if (ierr) {
+            if (group_rank == 0) fprintf(stderr, "%s: Couldn't set file view for %s", argv[0], argv[1]);
+            MPI_Finalize();
+            exit(6);
+        }
 
-        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 1, 1, &BY_comm);
-    } else if (color == 1) {  // Yellow
+        if (color == 0) {  // Blue: remove the unwanted word in text file
+            /* Allocate the buffer */
+            buf = new char[bufsize + 1];
+            /* Reads a file starting at the location specified by the individual file pointer (blocking, noncollective) */
+            ierr = MPI_File_read(in, buf, bufsize, MPI_CHAR, &status);
+            if (ierr) {
+                if (group_rank == 0) fprintf(stderr, "%s: Couldn't read from file %s", argv[0], argv[1]);
+                MPI_Finalize();
+                exit(7);
+            }
+            /* Gets the number of top-level elements received. */
+            MPI_Get_count(&status, MPI_CHAR, &nrchar);
+            /* Add a null character to the end of the buffer */
+            buf[nrchar] = '\0';
+            printf("\n------------------------[Blue]Process %d read %d characters--------------------\n%s\n", group_rank, nrchar, buf);
+            removePunctuation(buf);
+            printf("\n------------------------[Blue]Process %d After Process--------------------\n%s\n", group_rank, buf);
+            ierr = MPI_File_write(out, buf, nrchar, MPI_CHAR, &status);
+            if (ierr) {
+                if (group_rank == 0) fprintf(stderr, "%s: Couldn't write to file %s", argv[0], argv[2]);
+                MPI_Finalize();
+                exit(8);
+            }
 
-        //     // set to one word each line
-        //     setOneCharacter(&in, &out, group_rank, group_size, overlap);
-        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 0, 1, &BY_comm);
-        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 2, 12, &YG_comm);
-    } else if (color == 2) {  // Green
-        //     // count the word frequency
-        //     countFrequency(&in, &out, group_rank, group_size, overlap);
-        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 1, 12, &YG_comm);
-        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 3, 123, &GR_comm);
-    } else if (color == 3) {  // Red
+            /* Creates an intercommunicator from two intracommunicators. */
 
-        //     // sort by the word frequency
-        //     sortByFrequency(&in, &out, group_rank, group_size, overlap);
-        MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 2, 123, &GR_comm);
+            MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 1, 1, &BY_comm);
+
+            MPI_Finalized(&finalized);
+            if (!finalized)
+                MPI_Finalize();
+
+            return 0;
+        } else if (color == 1) {  // Yellow
+
+            //     // set to one word each line
+            //     setOneCharacter(&in, &out, group_rank, group_size, overlap);
+            MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 0, 1, &BY_comm);
+            MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 2, 12, &YG_comm);
+        } else if (color == 2) {  // Green
+            //     // count the word frequency
+            //     countFrequency(&in, &out, group_rank, group_size, overlap);
+            MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 1, 12, &YG_comm);
+            MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 3, 123, &GR_comm);
+        } else if (color == 3) {  // Red
+
+            //     // sort by the word frequency
+            //     sortByFrequency(&in, &out, group_rank, group_size, overlap);
+            MPI_Intercomm_create(group_comm, 0, MPI_COMM_WORLD, 2, 123, &GR_comm);
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        MPI_File_close(&in);
+        MPI_File_close(&out);
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    MPI_File_close(&in);
-    MPI_File_close(&out);
 
     MPI_Finalized(&finalized);
     if (!finalized)
