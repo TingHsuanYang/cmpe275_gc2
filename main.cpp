@@ -2,6 +2,7 @@
 // mpic++ main.cpp -o main.out
 // mpirun --hostfile mpi.config -np 4 ./main.out test.txt out.txt
 #include <mpi.h>
+#include <stdio.h>
 
 #include <iostream>
 #include <string>
@@ -79,9 +80,8 @@ int main(int argc, char const* argv[]) {
     int world_rank, world_size, group_rank, group_size;
     int initialized, finalized;
     int ierr;
-
     int bufsize;
-    char* buf;
+    int freqsum[26] = {0};
 
     MPI_Initialized(&initialized);
     if (!initialized)
@@ -131,7 +131,7 @@ int main(int argc, char const* argv[]) {
     MPI_Comm_rank(group_comm, &group_rank);
     MPI_Comm_size(group_comm, &group_size);
 
-    printf("Rank %d/%d in original comm, group [%s] %d/%d in new comm\n", world_rank, world_rank, colors[color].c_str(), color, group_size);
+    printf("Rank %d/%d in original comm, group [%s] %d/%d in new comm\n", world_rank, world_size, colors[color].c_str(), group_rank, group_size);
 
     /* Calculate how many elements that is */
     filesize = filesize / sizeof(char);
@@ -159,11 +159,9 @@ int main(int argc, char const* argv[]) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    if (color == 0) {  // Blue: remove the unwanted word in text file
+    if (color == 0) {  // Blue: remove the puctuations and spaces in text file
         int nrchar = 0;
-
-        /* Allocate the buffer */
-        buf = new char[bufsize + 1];
+        char* buf = new char[bufsize + 1];
         /* Reads a file starting at the location specified by the individual file pointer (blocking, noncollective) */
         ierr = MPI_File_read(in, buf, bufsize, MPI_CHAR, &status);
         if (ierr) {
@@ -181,59 +179,58 @@ int main(int argc, char const* argv[]) {
         printf("\n------------------------[Blue]Process %d After Process--------------------\n%s\n", group_rank, buf);
 
         MPI_Send(buf, bufsize, MPI_CHAR, group_rank, 0, BY_comm);
-    } else if (color == 1) {  // Yellow
-        buf = new char[bufsize + 1];
+    } else if (color == 1) {  // Yellow: convert to lowercase
+        char* buf = new char[bufsize + 1];
         /* receive the data from blue */
         MPI_Recv(buf, bufsize, MPI_CHAR, group_rank, 0, BY_comm, &status);
-        printf("\n------------------------[Yellow]Process %d received %d characters--------------------\n%s\n", group_rank, bufsize, buf);
+        printf("\n------------------------[Yellow]Process %d received %d characters--------------------\n", group_rank, bufsize);
         convertToLower(buf);
         printf("\n------------------------[Yellow]Process %d After Process--------------------\n%s\n", group_rank, buf);
         MPI_Send(buf, bufsize, MPI_CHAR, group_rank, 0, YG_comm);
-        // set to one word each line
-        //     setOneCharacter(&in, &out, group_rank, group_size, overlap);
-    } else if (color == 2) {  // Green
-
-        buf = new char[bufsize + 1];
+    } else if (color == 2) {  // Green: calculate the char frequency
+        char* buf = new char[bufsize + 1];
         int freq[26] = {0};
         /* receive the data from yellow */
         MPI_Recv(buf, bufsize, MPI_CHAR, group_rank, 0, YG_comm, &status);
-        printf("\n------------------------[Green]Process %d received %d characters--------------------\n%s\n", group_rank, bufsize, buf);
+        printf("\n------------------------[Green]Process %d received %d characters--------------------\n", group_rank, bufsize);
         calculateFrequency(buf, freq);
         printf("\n------------------------[Green]Process %d After Process--------------------\n", group_rank);
         for (int i = 0; i < 26; i++) {
-            printf("%c: %d\n", i + 97, freq[i]);
+            printf("%c: %d\n", 'a' + i, freq[i]);
         }
         MPI_Send(freq, 26, MPI_INT, group_rank, 0, GR_comm);
-        // MPI_Send(buf, bufsize, MPI_CHAR, group_rank, 0, GR_comm);
-        // count the word frequency
-        //     countFrequency(&in, &out, group_rank, group_size, overlap);
-    } else if (color == 3) {  // Red
-        buf = new char[bufsize + 1];
-        /* receive the data from green */
-        // MPI_Recv(buf, bufsize, MPI_CHAR, group_rank, 0, GR_comm, &status);
+    } else if (color == 3) {  // Red: write the result to file
         int freq[26] = {0};
         MPI_Recv(freq, 26, MPI_INT, group_rank, 0, GR_comm, &status);
         printf("\n------------------------[Red]Process %d received %d characters--------------------\n", group_rank, bufsize);
         for (int i = 0; i < 26; i++) {
-            printf("%c: %d\n", i + 97, freq[i]);
+            printf("%c: %d\n", 'a' + i, freq[i]);
         }
 
-        // write out to the file
-        // ierr = MPI_File_write(out, buf, nrchar, MPI_CHAR, &status);
-        // if (ierr) {
-        //     if (group_rank == 0) fprintf(stderr, "%s: Couldn't write to file %s", argv[0], argv[2]);
-        //     MPI_Finalize();
-        //     exit(8);
-        // }
-        printf("\n------------------------[Red]Process %d write %d characters--------------------\n%s\n", group_rank, bufsize, buf);
+        MPI_Reduce(freq, freqsum, 26, MPI_INT, MPI_SUM, 0, group_comm);
 
-        // sort by the word frequency
-        //     sortByFrequency(&in, &out, group_rank, group_size, overlap);
+        if (group_rank == 0) {
+            // print out freqsum
+            printf("-----freqsum------\n");
+            for (int i = 0; i < 26; i++) {
+                printf("%c: %d\n", 'a' + i, freqsum[i]);
+            }
 
-        // stop MPI_Recv from blocking
+            // write out to the file
+            char outbuf[1000];
+            int index = 0;
+            for (int i = 0; i < 26; i++) {
+                index += sprintf(outbuf + index, "%c: %d\n", 'a' + i, freqsum[i]);
+            }
+
+            ierr = MPI_File_write(out, outbuf, index, MPI_CHAR, &status);
+            if (ierr) {
+                if (group_rank == 0) fprintf(stderr, "%s: Couldn't write to file %s", argv[0], argv[2]);
+                MPI_Finalize();
+                exit(8);
+            }
+        }
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
 
     MPI_File_close(&in);
     MPI_File_close(&out);
