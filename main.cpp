@@ -4,6 +4,7 @@
 #include <mpi.h>
 #include <stdio.h>
 
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -37,7 +38,6 @@ void convertToLower(char* chunk) {
 }
 
 int calculateFrequency(char* chunk, int* freq) {
-    // int freq[26] = {0};
     int i = 0;
     while (chunk[i] != '\0') {
         if (chunk[i] >= 'a' && chunk[i] <= 'z') {
@@ -45,28 +45,19 @@ int calculateFrequency(char* chunk, int* freq) {
         }
         i++;
     }
-
     return *freq;
 }
 
 void create_Intercommunicator(MPI_Comm& comm, int color, MPI_Comm& a, MPI_Comm& b, MPI_Comm& c, MPI_Comm& d) {
-    if (color == 0) {  // Blue: remove the unwanted word in text file
-
-        /* Creates an intercommunicator from two intracommunicators. */
+    if (color == 0) {
         MPI_Intercomm_create(comm, 0, MPI_COMM_WORLD, 1, 1, &a);
-    } else if (color == 1) {  // Yellow
-        // set to one word each line
-        //     setOneCharacter(&in, &out, group_rank, group_size, overlap);
+    } else if (color == 1) {
         MPI_Intercomm_create(comm, 0, MPI_COMM_WORLD, 0, 1, &a);
         MPI_Intercomm_create(comm, 0, MPI_COMM_WORLD, 2, 12, &b);
-    } else if (color == 2) {  // Green
-        // count the word frequency
-        //     countFrequency(&in, &out, group_rank, group_size, overlap);
+    } else if (color == 2) {
         MPI_Intercomm_create(comm, 0, MPI_COMM_WORLD, 1, 12, &b);
         MPI_Intercomm_create(comm, 0, MPI_COMM_WORLD, 3, 123, &c);
-    } else if (color == 3) {  // Red
-        // sort by the word frequency
-        //     sortByFrequency(&in, &out, group_rank, group_size, overlap);
+    } else if (color == 3) {
         MPI_Intercomm_create(comm, 0, MPI_COMM_WORLD, 2, 123, &c);
     }
 }
@@ -116,15 +107,6 @@ int main(int argc, char const* argv[]) {
         exit(3);
     }
 
-    /* Open the output file */
-    ierr = MPI_File_open(MPI_COMM_WORLD, argv[2], MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &out);
-    if (ierr) {
-        if (world_rank == 0)
-            fprintf(stderr, "%s: Couldn't open output file %s\n", argv[0], argv[2]);
-        MPI_Finalize();
-        exit(4);
-    }
-
     /* split into groups*/
     int color = world_rank % 4;
     MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &group_comm);
@@ -144,14 +126,6 @@ int main(int argc, char const* argv[]) {
             fprintf(stderr, "%s: Couldn't set file view for %s", argv[0], argv[1]);
         MPI_Finalize();
         exit(5);
-    }
-
-    ierr = MPI_File_set_view(out, group_rank * bufsize, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL);  // split the file for group members
-    if (ierr) {
-        if (group_rank == 0)
-            fprintf(stderr, "%s: Couldn't set file view for %s", argv[0], argv[1]);
-        MPI_Finalize();
-        exit(6);
     }
 
     /* create intercommunicator for groups */
@@ -220,15 +194,14 @@ int main(int argc, char const* argv[]) {
             char outbuf[1000];
             int index = 0;
             for (int i = 0; i < 26; i++) {
-                index += sprintf(outbuf + index, "%c: %d\n", 'a' + i, freqsum[i]);
+                index += snprintf(outbuf + index, 1000 - index, "%c: %d\n", 'a' + i, freqsum[i]);
             }
 
-            ierr = MPI_File_write(out, outbuf, index, MPI_CHAR, &status);
-            if (ierr) {
-                if (group_rank == 0) fprintf(stderr, "%s: Couldn't write to file %s", argv[0], argv[2]);
-                MPI_Finalize();
-                exit(8);
-            }
+            // write out to file
+            ofstream outfile;
+            outfile.open("out.txt");
+            outfile << outbuf;
+            outfile.close();
         }
     }
 
